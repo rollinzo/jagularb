@@ -34,14 +34,15 @@ class Jagular
     
     #set @pages_json, @posts_json
   end
-
+  
+  #copied to jag3
   def update_posts_and_pages
     page_changes = []
     pages_changes << look_for_pages_changed
-    delete_yaml_pages_not_marked
-    update_posts if hash_contents(@posts_json) != @stored_posts_json_hash
-    page_changes << look_for_pages_changed_by_posts
-    update_pages(page_changes.uniq) if !page_changes.empty?
+    #delete_yaml_pages_not_marked
+    #update_posts if hash_contents(@posts_json) != @stored_posts_json_hash
+    #page_changes << look_for_pages_changed_by_posts
+    #update_pages(page_changes.uniq) if !page_changes.empty?
     update_posts_and_pages_hashes
   
   end

@@ -83,7 +83,35 @@ class Jagular
     `mkdir #{@config["output_path"]}` if !Dir.exists?(@config["output_path"])
     @last_updated = get_last_updated
     fetch_and_load_helpers
+    @pages_json = get_pages_json_from_api
+    @stored_pages_json_hash = get_stored_pages_json_hash
     load_yaml_files
+  end
+
+  def get_pages_json_from_api
+     return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/pages')
+
+  end
+
+  def get_posts_json_from_api
+    return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/posts')
+  end
+
+  def get_posts
+    return JSON.parse(get_posts_from_api)
+  end
+
+  def get_stored_pages_json_hash
+    if File.exists?(@config["stored_entries_path"] + "pages_json_hash.txt")
+      hash_file = File.open(@config["stored_entries_path"] + "pages_json_hash.txt", "r")
+      return File.readline(hash_file).chomp!
+    else
+      return nil
+    end
+  end
+
+  def hash_contents(contents)
+    Digest::MD5.hexdigest(contents)
   end
 
   def load_yaml_files
@@ -95,7 +123,11 @@ class Jagular
     posts_file = File.open( @config["stored_entries_path"] + "posts.yaml", "r")
     @stored_posts = YAML.load(File.read(posts_file), permitted_classes: [StoredEntry])
     posts_file.close
-    #same thing for pages...    
+
+    pages_file = File.open( @config["stored_entries_path"] + "pages.yaml", "r")
+    @stored_pages = YAML.load(File.read(pages_file), permitted_classes: [StoredEntry])
+    pages_file.close
+
   end
 
 
@@ -160,11 +192,6 @@ class Jagular
     return last_updated
   end
  
-  def get_posts
-    resp = Faraday.get(@config['json_api'] + 'wp-json/wp/v2/posts')
-    posts_json = JSON.parse(resp.body)
-  end
-
 
   def pull_template(template)
     if @config["template_path_set"]
@@ -262,6 +289,48 @@ class Jagular
 
     `echo #{Time.now.to_i.to_s} > #{@config["timestamp_last_updated"]}`
   end
+
+
+  def update_posts_and_pages
+    page_changes = []
+    pages_changes << look_for_pages_changed
+    #delete_yaml_pages_not_marked
+    #update_posts if hash_contents(@posts_json) != @stored_posts_json_hash
+    #page_changes << look_for_pages_changed_by_posts
+    #update_pages(page_changes.uniq) if !page_changes.empty?
+    #update_posts_and_pages_hashes
+
+  end
+
+  def look_for_pages_changed
+    results_arr = []
+    if hash_contents(@pages_json) != @stored_pages_json_hash
+        if page_entry_changed_or_new?(jp)
+          results_arr << jp.slug
+          mark_yaml_page(jp)
+        end
+      end
+    end
+    return results_arr.uniq
+  end
+
+  def page_entry_changed_or_new(page)
+    if page.class == Hash
+      #check if exists in stored_entries
+      index = @stored_posts.find_index {|post| post["slug"] == page["slug"]
+      if index == nil
+        return true
+      else
+        if wp_timestamp_to_epoch(page["modified_gmt"]) != wp_timestamp_to_epoch(@stored_posts[index].modified_gmt) 
+        return true
+        else
+          return false
+        end
+    else
+      raise "only implemented for Hash input"
+    end
+  end
+
 
 
 end #end of class
