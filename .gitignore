@@ -1,0 +1,10 @@
+config.yaml
+last_updated.timestamp
+Gemfile.lock
+build/
+css/
+images/
+templates/
+helpers/
+stored_entries/
+

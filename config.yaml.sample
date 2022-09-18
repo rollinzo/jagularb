@@ -1,0 +1,35 @@
+---
+
+#template_path (optional) -- includes trailing slash
+template_path: "./templates/"
+
+# template_files: A label points to a file path
+layout_default: { in: "layout.html.erb"}
+post_default: {in: "post.html.erb", out: "$slug$.html"}
+page_default: {in: "page.html.erb", out: "$slug$.html"}
+index_page: {in: "index.html.erb", out: "index.html"}
+custom_page: {in: "custom1.html.erb", out: "custom.html", css: ["custom_css"]} 
+
+# css files
+css_path: "./css/"
+base_css: "main.css"
+custom_css: "custom.css"
+
+
+#page lookup
+pages: 
+icanhazcheeseburger: { template: "custom_page" }
+
+#json api
+json_api: "http://my-wordpress-url.com/"
+#output_path -- where to place the generated html pages
+output_path: "./build/"
+images_directory: "images/"
+#will be concatenated to output_path per entry based. directory names should contain trailing slash '/'
+output_directories: { default_posts: "posts/", default_pages: nil}
+
+#Time.now.to_i before site is launched
+starting_time: 1662006193
+
+#where to store file with time stamp of last update
+timestamp_last_updated: "last_updated.timestamp"
