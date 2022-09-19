@@ -57,6 +57,7 @@ end
 class StoredEntry
   attr_reader :slug
   attr_reader :modified_gmt
+  attr_accessor :marked
 
   def initialize(entry_or_hash)
     if entry_or_hash.class == Hash
@@ -66,6 +67,7 @@ class StoredEntry
       @slug = entry_or_hash.slug
       @modified_gmt = entry_or_hash.modified_gmt
     end
+    @marked = false
   end
 
 end
@@ -294,9 +296,12 @@ class Jagular
   def update_posts_and_pages
     page_changes = []
     pages_changes << look_for_pages_changed
-    #delete_yaml_pages_not_marked
-    #update_posts if hash_contents(@posts_json) != @stored_posts_json_hash
-    #page_changes << look_for_pages_changed_by_posts
+    delete_yaml_pages_not_marked
+    updated_posts = []
+    if hash_contents(@posts_json) != @stored_posts_json_hash
+      updated_posts = update_posts
+    end
+      #page_changes << look_for_pages_changed_by_posts(updated_posts)
     #update_pages(page_changes.uniq) if !page_changes.empty?
     #update_posts_and_pages_hashes
 
@@ -305,23 +310,45 @@ class Jagular
   def look_for_pages_changed
     results_arr = []
     if hash_contents(@pages_json) != @stored_pages_json_hash
-        if page_entry_changed_or_new?(jp)
-          results_arr << jp.slug
-          mark_yaml_page(jp)
+      @pages.each do |page|
+        #if entry_changed_or_new?(jp, @stored_pages)
+         #   results_arr << jp["slug"]
+        #end
+        compare_result = compare_entry(page, @stored_pages)
+        if compare_result[:found] == true
+          mark_stored_entry(entry, collection)
+          results_arr << page["slug"] if compare_result[:changed]
+        else
+          results_arr << page["slug"]
         end
       end
+  
     end
     return results_arr.uniq
   end
 
-  def page_entry_changed_or_new(page)
-    if page.class == Hash
+  def compare_entry(entry, collection)
+      index = collection.find_index {|e| entry["slug"] == e.slug }
+      if index == nil
+        return {:found => false}
+      else
+        if wp_timestamp_to_epoch(page["modified_gmt"]) != wp_timestamp_to_epoch(collection[index].modified_gmt)
+        return {:found => true, :changed => true}
+        else
+          return {:found => true, :changed => false}
+        end
+
+  end
+
+  def entry_changed_or_new(entry, collection)
+    
+    if entry.class == Hash
       #check if exists in stored_entries
-      index = @stored_posts.find_index {|post| post["slug"] == page["slug"]
+      index = collection.find_index {|e| entry["slug"] == e.slug }
       if index == nil
         return true
       else
-        if wp_timestamp_to_epoch(page["modified_gmt"]) != wp_timestamp_to_epoch(@stored_posts[index].modified_gmt) 
+        if wp_timestamp_to_epoch(page["modified_gmt"]) != wp_timestamp_to_epoch(collection[index].modified_gmt) 
         return true
         else
           return false
@@ -330,6 +357,31 @@ class Jagular
       raise "only implemented for Hash input"
     end
   end
+
+  def mark_stored_entry(entry, collection)
+    stored_index = collection.find_index {|e| entry["slug"] == e.slug}
+
+    collection[stored_index].marked = true
+  end
+
+  def delete_yaml_pages_not_marked
+    new_list = []
+    @stored_pages.each do |se|
+      new_list << se if se.marked
+    end
+    @stored_pages = new_list
+  end
+
+  def update_posts
+    @posts.each do |post|
+      if entry_changed_or_new(post, @stored_posts)
+
+      post_html = render_template_html(post)
+      render_with_layout(post, post_html)
+    end
+    store_posts_yaml
+  end
+
 
 
 
