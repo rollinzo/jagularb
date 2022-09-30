@@ -7,4 +7,6 @@ images/
 templates/
 helpers/
 stored_entries/
+public/
+assets/
 

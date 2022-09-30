@@ -4,70 +4,73 @@ require 'pry'
 require 'faraday'
 require 'nokogiri'
 
-class Author
-  def initialize(hash = {})
-    hash.keys.each do |key|
-      self.instance_variable_set("@#{key}", hash[key])
-      self.class.send(:define_method, key.to_sym) do
-          instance_variable_get "@#{key}"
-      end
-    end
-  end
-end
+#class Author
+#  def initialize(hash = {})
+#    hash.keys.each do |key|
+##      self.instance_variable_set("@#{key}", hash[key])
+ #     self.class.send(:define_method, key.to_sym) do
+ #         instance_variable_get "@#{key}"
+ #     end
+ #   end
+ # end
+#end
 
 
-class Entry
-  def initialize(hash = {})
-    hash.keys.each do |key|
-      self.instance_variable_set("@#{key}", hash[key])
-      self.class.send(:define_method, key.to_sym) do 
-          instance_variable_get "@#{key}"
-      end
-    end
-    set_author
-    @output_directory = nil
-  end
+#class Entry
+#  def initialize(hash = {})
+#    hash.keys.each do |key|
+#      self.instance_variable_set("@#{key}", hash[key])
+#      self.class.send(:define_method, key.to_sym) do 
+#          instance_variable_get "@#{key}"
+#      end
+#    end
+#    set_author
+#    @output_directory = nil
+#  end
   
-  def set_output_directory(dir_name)
-    @output_directory = dir_name
-  end
+ # def set_output_directory(dir_name)
+ #   @output_directory = dir_name
+ # end
 
-  def output_directory
-    @output_directory
-  end
+  #def output_directory
+  #  @output_directory
+  #end
 
-  def set_page_content(page_html)
-    @page_content = page_html
-  end
+  #def set_page_content(page_html)
+  #  @page_content = page_html
+  #end
 
-  def page_content
-    @page_content
-  end
+  #def page_content
+  #  @page_content
+  #end
 
-  def set_author
-    author_link = self._links["author"][0]["href"]
-    @author = Author.new(JSON.parse(Faraday.get(author_link).body))
-  end
+  #def set_author
+  #  author_link = self._links["author"][0]["href"]
+  #  @author = Author.new(JSON.parse(Faraday.get(author_link).body))
+  #end
 
-  def get_binding
-    binding
-  end
-end
+  #def get_binding
+  #  binding
+  #end
+#end
 
 class StoredEntry
   attr_reader :slug
   attr_reader :modified_gmt
   attr_accessor :marked
 
-  def initialize(entry_or_hash)
-    if entry_or_hash.class == Hash
-      @slug = entry_or_hash['slug']
-      @modified_gmt = entry_or_hash['modified_gmt']
-    else
-      @slug = entry_or_hash.slug
-      @modified_gmt = entry_or_hash.modified_gmt
-    end
+  #outfile_path incorporates an optional custom template field: "directory"
+  #does not include "output_path/" section from @config["output_path"]
+  #e.g. /output_path/my_directory/outfile.html
+  #e.g. /output_path/posts/outfile.html
+  attr_accessor :outfile_path
+
+  def initialize(entry)
+    @slug = entry['slug']
+    @modified_gmt = entry['modified_gmt']
     @marked = false
+    @outfile_path = nil
+    
   end
 
 end
@@ -87,7 +90,29 @@ class Jagular
     fetch_and_load_helpers
     @pages_json = get_pages_json_from_api
     @stored_pages_json_hash = get_stored_pages_json_hash
+    @posts = get_posts
+    setup_pages
     load_yaml_files
+  end
+
+  def setup_pages
+     #in this method using a pointer to @config templates. Nothing in the rest of the program should change the config template, so this is okay without a duplication
+     @pages = get_pages()
+     @pages.each do |p|
+       page_index = get_index_of_page_in_config(p)
+       if page_index == nil
+         p['template'] = @config['page_default']
+       else
+         p['template'] = @config['pages'][page_index]
+       end
+     end
+  end
+
+  def get_index_of_page_in_config(page)
+    @config['pages'].each_with_index do |p, p_index|
+      return p_index if p["slug"] == page["slug"]
+    end
+    return nil
   end
 
   def get_pages_json_from_api
@@ -97,6 +122,10 @@ class Jagular
 
   def get_posts_json_from_api
     return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/posts')
+  end
+
+  def get_pages
+    return JSON.parse(get_pages_from_api)
   end
 
   def get_posts
@@ -208,50 +237,81 @@ class Jagular
   end
 
   def outfile_name(entry, template)
+    
     if match = /\$(.*)\$/.match(template["out"])
-      return template["out"].gsub(match[0], entry.send(match[1].to_sym))
+      if entry.class == Hash
+        return template["out"].gsub(match[0], entry[match[1]])
+      elsif entry.class == StoredEntry
+        return template["out"].gsub(match[0], entry.send(match[1].to_sym))
+      else
+        raise "entry is not of Hash or StoredEntry class"
+      end
     else
       return template["out"]
     end
+
   end
 
-  def layout_page(entry, template = "layout_default")
-    layout_erb = pull_template(template)
+
+
+  def render_entry_html(entry)
+     entry_erb = pull_template(entry["template"]["in"]
+     entry_rhtml = ERB.new(entry_erb)
+     return entry_rhtml.result_with_hash(entry)
+  end
+
+  def render_layout(entry, layout_template = "layout_default")
+    layout_erb = pull_template(layout_template)
     layout_rhtml = ERB.new(layout_erb)
-    layout_rhtml.result(entry.get_binding)
+    return layout_rhtml.result_with_hash(entry)
   end
 
-  def print_page(entry, template_name)
-    template_erb = pull_template(template_name)
-    page_html = ERB.new(template_erb)
-    entry.set_page_content page_html.result(entry.get_binding)
-    output_html = copy_and_replace_images(layout_page(entry))
-    output_file_path = @config["output_path"] + output_directory(entry.output_directory) + outfile_name(entry, @config[template_name])
+  def write_entry_to_file(entry, html)
+    if entry["template"].has_key? "directory"
+      output_file_path = @config["output_path"] + entry["template"]["directory"] + outfile_name(entry, @config[template_name])
+    else
+      output_file_path = @config["output_path"] + outfile_name(entry, @config[template_name])
+    end
     out_file = File.open(output_file_path, "w")
     File.write(out_file, output_html)
     out_file.close
+    return output_file_path
+ end
+
+  #TODO: TO BE REPLACED
+  #def print_page(entry, template_name)
+  #  template_erb = pull_template(template_name)
+  #  page_html = ERB.new(template_erb)
+  #  entry.set_page_content page_html.result(entry.get_binding)
+  #  output_html = copy_and_replace_images(layout_page(entry))
+  #  output_file_path = @config["output_path"] + output_directory(entry.output_directory) + outfile_name(entry, @config[template_name])
+  #  out_file = File.open(output_file_path, "w")
+  #  File.write(out_file, output_html)
+  #  out_file.close
 
   end
 
-  def create_new_image_path(old_image_path)
+  def create_new_image_path(old_image_path, entry_image_dir)
+    #TODO: check for entry_image_dir and create if need to
+
     #split based on match up including to wp-content/uploads
     my_match = /^http.*wp-content\/uploads\/(\d*\/\d*\/)(.*)/.match(old_image_path)
     filename = my_match[2]
     month_day = my_match[1]
     fetch_url = @config["json_api"] + "wp-content/uploads/" + month_day + filename
     `mkdir #{@config["output_path"] + @config["images_directory"]}` if !Dir.exists?(@config["output_path"] + @config["images_directory"])
-    write_path = @config["output_path"] + @config["images_directory"] + filename
+    write_path = @config["output_path"] + @config["images_directory"] + entry_image_dir + filename
     resp = Faraday.get(fetch_url)
     File.open(write_path, 'wb') { |wp| wp.write(resp.body) } 
     return @config["images_directory"] + filename
   end
 
-  def copy_and_replace_images(page_html)
+  def copy_and_replace_images(page_html, entry_image_dir)
   # since the #to_html method dumps an entire html doc, need to run this method after layout+page have been generated
     ndoc = Nokogiri::HTML(page_html)
     images = ndoc.search("img")
     images.each do |i|
-       new_image_path = create_new_image_path(i.get_attribute "src")
+       new_image_path = create_new_image_path(i.get_attribute "src", entry_image_dir)
         i.set_attribute("src", new_image_path)
     end
      ndoc.to_html
@@ -273,18 +333,19 @@ class Jagular
     DateTime.parse(wp_timestring).to_time.to_i
   end
 
-  def get_and_print_posts
-    resp = Faraday.get(@config["json_api"] + "wp-json/wp/v2/posts")
-    posts = JSON.parse(resp.body)
-    posts.each do |p| 
-     if wp_timestamp_to_epoch(p["date"]) > @last_updated
-        entry = Entry.new(p)
-        print_page(entry, "page_default")
-        puts "printing #{entry.title['rendered']}"
-      end
-    end
-    run_update
-  end
+  #PROBABLY DELETE THIS
+  #def get_and_print_posts
+  #  resp = Faraday.get(@config["json_api"] + "wp-json/wp/v2/posts")
+  #  posts = JSON.parse(resp.body)
+  #  posts.each do |p| 
+  #   if wp_timestamp_to_epoch(p["date"]) > @last_updated
+  #      entry = Entry.new(p)
+  #      print_page(entry, "page_default")
+  #      puts "printing #{entry.title['rendered']}"
+  #    end
+  #  end
+  #  run_update
+  #end
 
   def run_update
 
@@ -296,11 +357,12 @@ class Jagular
   def update_posts_and_pages
     page_changes = []
     pages_changes << look_for_pages_changed
-    delete_yaml_pages_not_marked
+    delete_entries_not_marked(@stored_pages)
     updated_posts = []
     if hash_contents(@posts_json) != @stored_posts_json_hash
       updated_posts = update_posts
     end
+    #only pages in b need to be checked (a+c are already included in page_changes
       #page_changes << look_for_pages_changed_by_posts(updated_posts)
     #update_pages(page_changes.uniq) if !page_changes.empty?
     #update_posts_and_pages_hashes
@@ -311,12 +373,9 @@ class Jagular
     results_arr = []
     if hash_contents(@pages_json) != @stored_pages_json_hash
       @pages.each do |page|
-        #if entry_changed_or_new?(jp, @stored_pages)
-         #   results_arr << jp["slug"]
-        #end
         compare_result = compare_entry(page, @stored_pages)
         if compare_result[:found] == true
-          mark_stored_entry(entry, collection)
+          link_and_mark_stored_entry(entry, @stored_pages[compare_result[:index]]))
           results_arr << page["slug"] if compare_result[:changed]
         else
           results_arr << page["slug"]
@@ -332,54 +391,72 @@ class Jagular
       if index == nil
         return {:found => false}
       else
-        if wp_timestamp_to_epoch(page["modified_gmt"]) != wp_timestamp_to_epoch(collection[index].modified_gmt)
-        return {:found => true, :changed => true}
+        if wp_timestamp_to_epoch(entry["modified_gmt"]) != wp_timestamp_to_epoch(collection[index].modified_gmt)
+        return {:found => true, :changed => true, :index => index}
         else
-          return {:found => true, :changed => false}
+          return {:found => true, :changed => false, :index => index}
         end
 
   end
 
-  def entry_changed_or_new(entry, collection)
-    
-    if entry.class == Hash
-      #check if exists in stored_entries
-      index = collection.find_index {|e| entry["slug"] == e.slug }
-      if index == nil
-        return true
-      else
-        if wp_timestamp_to_epoch(page["modified_gmt"]) != wp_timestamp_to_epoch(collection[index].modified_gmt) 
-        return true
-        else
-          return false
-        end
-    else
-      raise "only implemented for Hash input"
-    end
+  #deprecated in favor of compare_entry    
+  #def entry_changed_or_new(entry, collection)
+  #  #check if exists in stored_entries
+  #  index = collection.find_index {|e| entry["slug"] == e.slug }
+  #  if index == nil
+  #    return true
+  #  else
+  #    if wp_timestamp_to_epoch(page["modified_gmt"]) != wp_timestamp_to_epoch(collection[index].modified_gmt) 
+   #     return true
+   #   else
+   #     return false
+   #  end
+   # end
+  #end
+
+  def link_and_mark_stored_entry(entry, stored_entry)
+    entry["stored_entry"] = stored_entry
+    stored_entry.marked = true
   end
 
-  def mark_stored_entry(entry, collection)
-    stored_index = collection.find_index {|e| entry["slug"] == e.slug}
-
-    collection[stored_index].marked = true
-  end
-
-  def delete_yaml_pages_not_marked
+  def delete_entries_not_marked(collection)
     new_list = []
-    @stored_pages.each do |se|
+    collection.each do |se|
       new_list << se if se.marked
+      remove_entry_files(se)
     end
-    @stored_pages = new_list
+    collection = new_list
+  end
+
+  def remove_entry_files(stored_entry)
+    #remove html file
+    `rm #{config["output_path"] + stored_entry.outfile_path}`
+    #remove images
+    `rm -rf #{@config["output_path"] + @config["images_directory"] + stored_entry.slug + "/"}`
   end
 
   def update_posts
+    update_list = []
     @posts.each do |post|
-      if entry_changed_or_new(post, @stored_posts)
-
-      post_html = render_template_html(post)
-      render_with_layout(post, post_html)
+      compare_result = compare_entry(post, @stored_posts)
+      if compare_result[:found] == true
+        link_and_mark_stored_entry(entry, @stored_posts[compare_result[:index]]))
+         update_list << post if compare_result[:changed]
+        else
+          update_list << post
+        end
     end
-    store_posts_yaml
+    delete_entries_not_marked(@stored_posts)
+    update_list.each do |u_post| 
+      post_html = render_entry_html(u_post)
+      layout_html = render_layout(u_post, post_html)
+      final_html = copy_and_replace_images(layout_html)
+      file_path = write_entry_to_file(entry, final_html)
+      se = StoredEntry.new(u_post)
+      se.outfile_path = file_path
+      u_post["stored_entry"] = se
+    end
+    return update_list
   end
 
 
