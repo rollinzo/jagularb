@@ -16,13 +16,19 @@ class Jagular
     @config["template_path"].length > 0 ? @config["template_path_set"] = true : @config["template_path_set"] = false
     #`mkdir #{@config["output_path"]}` if !Dir.exists?(@config["output_path"])
     #@last_updated = get_last_updated
+    @globals = {}
+    @globals["site_url"] = @config["site_url"]
+    @globals["assets_url"] = @config["site_url"] + "assets/"
+    @globals["css_url"] = @config["site_url"] + "css/"
     @pages = get_pages
     #add page config to pages 
     @pages.each do |page|
+      page["globals"] = @globals
       if @config["pages"].include? page["slug"]
-        page["template"] = @config["pages"][page["slug"]]
+        template_name = @config["pages"][page["slug"]]
+        page["template"] = @config["templates"][template_name]
       else
-        page["template"] = @config["page_default"]
+        page["template"] = @config["templates"]["page_default"]
       end
     
     end
@@ -98,30 +104,59 @@ class Jagular
   #PAGE BUILDING
 
   def build_pages
+    render_css
+    build_assets
     @pages.each do |page|
       #helper function added in load_helpers, called in initialie
       page["content_hash"] = page["template"]["helper"]["function"].call()
-      page["final_assets_path"] = @config["output_path"] + page["template"]["assets_dir"]
+      page["final_assets_path"] = "./assets/"
       page["content_hash"]["rendered_entry"] = render_entry_html(page)
       layout_html = render_layout(page)
       #final_html = copy_and_replace_images(layout_html, page["slug"]+"/")
       #file_path = write_entry_to_file(page, final_html)
       write_entry_to_file(page, layout_html)
-      build_assets(page)
+    
     end
   end
 
-  def build_assets(entry)
-      assets_out = entry["final_assets_path"]
-    if !Dir.exist?(assets_out)
-      assets_in = @config["assets_path"] + entry["template"]["assets_dir"] 
-      `mkdir -p #{assets_out}`
-      `cp -r #{assets_in + "css/"} #{assets_out + "."}`
+  def build_assets
+    `cp -r #{@config["assets_path"]} #{@config["output_path"] + "."}`
+    #@config["templates"].keys.each do |key|
+
+     # template = @config["templates"][key]
+     # if template["assets_dir"] && Dir.exists?(@config["assets_path"] + template["assets_dir"])
+     #   binding.pry
+     #   assets_out = @config["output_path"] + template["assets_dir"]
+     #   assets_in = @config["assets_path"] + template["assets_dir"] 
+     #   `mkdir -p #{assets_out}`
+     #   `cp -r #{assets_in} #{@config["output_path"]+"."}`
    
-      `cp -r #{assets_in + "img/"} #{assets_out + "."}`
+     # end
+    #end
+  end
+
+  def render_css
+    `mkdir #{@config["output_path"]+"css/"}`
+    Dir.children(@config["css_path"]).each do |filename| 
+      my_match = /.*\.erb$/.match(filename)
+      if !my_match.nil?
+        f = File.open(@config["css_path"]+filename, "r")
+        file_contents = f.read 
+        f.close
+        my_css = erb2css(file_contents)
+        filename2 = filename.gsub(/\.erb$/, "")
+        File.write(@config["output_path"] + @config["css_path"] + filename2, my_css)
+      else
+       `cp #{@config["css_path"]+filename} #{@config["output_path"] + @config["css_path"] + filename}`
+      end
     end
   end
 
+  def erb2css(erbfile_contents)
+    rcss = ERB.new(erbfile_contents)
+    return rcss.result_with_hash({"globals" => @globals})
+
+  end
 
 
   def pull_template_erb(template_file_name)
@@ -144,7 +179,7 @@ class Jagular
   end
 
   def render_layout(entry)
-    layout_erb = pull_template_erb(@config["layout_default"]["in"])
+    layout_erb = pull_template_erb(@config["templates"]["layout_default"]["in"])
     layout_rhtml = ERB.new(layout_erb)
     return layout_rhtml.result_with_hash(entry)
   end
