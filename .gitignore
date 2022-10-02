@@ -6,6 +6,7 @@ css/
 images/
 templates/
 helpers/
+matchers/
 stored_entries/
 public/
 assets/

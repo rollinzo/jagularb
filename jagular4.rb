@@ -33,6 +33,12 @@ class Jagular
     
     end
     fetch_and_load_helpers
+    load_matchers
+    @posts = get_posts
+    @posts.each do |post|
+      post["globals"] = @globals
+      post["template"] = @config["templates"]["post_default"]
+    end
 
   end
   
@@ -48,11 +54,11 @@ class Jagular
   end
 
   def get_pages
-    return JSON.parse(get_pages_json_from_api)
+    return @pages || JSON.parse(get_pages_json_from_api)
   end
 
   def get_posts
-    return JSON.parse(get_posts_json_from_api)
+    return @posts || JSON.parse(get_posts_json_from_api)
   end
 
   
@@ -70,16 +76,28 @@ class Jagular
           curr_mod = Module.const_get(helper_name)
           mod_obj = curr_mod.send(:new, self)
           page["template"]["helper"]["obj"] = mod_obj
-          page["template"]["helper"]["function"] = mod_obj.get_helper_function
+          #page["template"]["helper"]["function"] = mod_obj.get_helper_function
         end
       else
 
         #assign default helper
         page["template"]["helper"] ={}
-        page["template"]["helper"]["obj"] = Object.new
-        page["template"]["helper"]["function"] = Proc.new { {} }
+        obj = Object.new
+        page["template"]["helper"]["obj"] = obj
+        obj.define_singleton_method(:run_helpers) do |entry|
+            {}
+        end
+
       end
     end
+    [ @config["templates"]["post_default"], @config["templates"]["page_default"]].each do |template|
+          require_relative @config["helper_path"] + template["helper"]["file"]
+          curr_mod = Module.const_get(template["helper"]["module_name"]) 
+          mod_obj = curr_mod.send(:new, self)
+          template["helper"]["obj"] = mod_obj
+
+    end
+
   end
 
   def get_helper_file(page)
@@ -98,7 +116,39 @@ class Jagular
     end
   end
 
+  #LOAD MATCHERS
 
+  def load_matchers
+    @matchers = []
+    @config["matchers"].keys.each do |key|
+      matcher = @config["matchers"][key]
+      require_relative @config["matchers_path"] + matcher["file"]
+      curr_mod = Module.const_get(matcher["module_name"])
+      mod_obj = curr_mod.send(:new, @config)
+      @matchers << mod_obj
+    end
+  end
+
+  def run_matchers(match_string)
+    @matchers.each do |m|
+      my_match = m.get_matcher(match_string)
+      return my_match if my_match != nil
+    end
+    return nil
+  end
+
+  #POSTS BUILDING
+  
+  def build_posts
+    `mkdir #{@config["output_path"] + "posts/"} `
+    @posts.each do |post|
+      post["content_hash"] = post["template"]["helper"]["obj"].run_helpers(post)
+      post["content_hash"]["rendered_entry"] = render_entry_html(post)
+      layout_html = render_layout(post)
+      final_html = copy_and_replace_images(layout_html, post["slug"]+"/")
+      file_path = write_entry_to_file(post, final_html)
+    end
+  end
 
 
   #PAGE BUILDING
@@ -108,13 +158,12 @@ class Jagular
     build_assets
     @pages.each do |page|
       #helper function added in load_helpers, called in initialie
-      page["content_hash"] = page["template"]["helper"]["function"].call()
-      page["final_assets_path"] = "./assets/"
+      page["content_hash"] = page["template"]["helper"]["obj"].run_helpers(page)
       page["content_hash"]["rendered_entry"] = render_entry_html(page)
       layout_html = render_layout(page)
-      #final_html = copy_and_replace_images(layout_html, page["slug"]+"/")
-      #file_path = write_entry_to_file(page, final_html)
-      write_entry_to_file(page, layout_html)
+      final_html = copy_and_replace_images(layout_html, page["slug"]+"/")
+      file_path = write_entry_to_file(page, final_html)
+      #write_entry_to_file(page, layout_html)
     
     end
   end
@@ -196,7 +245,7 @@ class Jagular
 
   def write_entry_to_file(entry, html)
     if entry["template"].has_key? "directory"
-      output_file_path = @config["output_path"] + entry["template"]["directory"] + outfile_name(entry, @config[template_name])
+      output_file_path = @config["output_path"] + entry["template"]["directory"] + outfile_name(entry)
     else
       output_file_path = @config["output_path"] + outfile_name(entry)
     end
@@ -206,19 +255,14 @@ class Jagular
     return output_file_path
  end
 
-  def create_new_image_path(old_image_path, entry_image_dir)
+  def create_new_image_path(old_image_path, new_image_directory_path, new_filename)
     #TODO: check for entry_image_dir and create if need to
 
-    #split based on match up including to wp-content/uploads
-    my_match = /^http.*wp-content\/uploads\/(\d*\/\d*\/)(.*)/.match(old_image_path)
-    filename = my_match[2]
-    month_day = my_match[1]
-    fetch_url = @config["json_api"] + "wp-content/uploads/" + month_day + filename
-    `mkdir #{@config["output_path"] + @config["images_directory"]}` if !Dir.exists?(@config["output_path"] + @config["images_directory"])
-    write_path = @config["output_path"] + @config["images_directory"] + entry_image_dir + filename
-    resp = Faraday.get(fetch_url)
-    File.open(write_path, 'wb') { |wp| wp.write(resp.body) }
-    return @config["images_directory"] + filename
+    #`mkdir #{@config["output_path"] + @config["images_directory"]}` if !Dir.exists?(@config["output_path"] + @config["images_directory"])
+    `mkdir -p #{new_image_directory_path}` if !Dir.exists?(new_image_directory_path)
+    resp = Faraday.get(old_image_path)
+    File.open(new_image_directory_path+new_filename, 'wb') { |wp| wp.write(resp.body) }
+    return true
   end
 
   def copy_and_replace_images(page_html, entry_image_dir)
@@ -230,8 +274,15 @@ class Jagular
        #match against @config["replace_image_urls"]
        #easy with this? Regexp.new @config["json_api"] + "uploads"
        #create_new_image_path(i.get_attribute "src", my_regex, entry_image_dir)
-       new_image_path = create_new_image_path(i.get_attribute "src", entry_image_dir)
-        i.set_attribute("src", new_image_path)
+       
+       old_path = i.get_attribute "src"
+       new_filename = run_matchers(old_path)
+       if new_filename != nil
+         image_path = @config["images_directory"] + entry_image_dir
+         write_path = @config["output_path"] + image_path
+         new_image_path = create_new_image_path(old_path, write_path, new_filename)
+         i.set_attribute("src", @globals['site_url']+image_path+new_filename)
+       end
     end
      ndoc.to_html
   end
