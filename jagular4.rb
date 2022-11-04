@@ -38,8 +38,11 @@ class Jagular
     @posts.each do |post|
       post["globals"] = @globals
       post["template"] = @config["templates"]["post_default"]
+      post["ruby_datetime"] = DateTime.parse(post["modified_gmt"]).to_time
     end
-
+    @users = get_users
+    @media = get_media
+    @tags = get_tags
   end
   
   #PULL JSON FROM WORDPRESS
@@ -53,6 +56,20 @@ class Jagular
     return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/posts').body
   end
 
+  def get_users_json_from_api
+    return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/users').body
+  end
+  
+
+  def get_media_json_from_api
+    return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/media').body
+  end
+  
+  
+  def get_tags_json_from_api
+    return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/tags').body
+  end
+  
   def get_pages
     return @pages || JSON.parse(get_pages_json_from_api)
   end
@@ -61,9 +78,19 @@ class Jagular
     return @posts || JSON.parse(get_posts_json_from_api)
   end
 
+  def get_users
+     return @users || JSON.parse(get_users_json_from_api)
+  end 
+
+
+  def get_media
+     return @media || JSON.parse(get_media_json_from_api)
+  end 
   
-
-
+  
+  def get_tags
+     return @tags || JSON.parse(get_media_json_from_api)
+  end 
   #LOAD HELPERS
 
   def fetch_and_load_helpers
@@ -137,6 +164,29 @@ class Jagular
     return nil
   end
 
+
+  #TEMPLATE METHODS
+  
+  def lookup_author_for_entry(entry)
+    my_id = entry["author"]
+    @users.find {|u| u["id"] == my_id}
+  end
+
+  def lookup_media_for_entry(entry)
+    my_id = entry["featured_media"]
+    @media.find {|m| m["id"] == my_id}
+  end
+
+  def get_id_for_tag(tag_string)
+    @tags.find {|t| t["name"] == tag_string}
+  end
+
+
+
+  def pretty_date(entry)
+    DateTime.parse(entry["modified_gmt"]).to_time.strftime("%B %d, %Y")
+  end
+
   #POSTS BUILDING
   
   def build_posts
@@ -163,7 +213,6 @@ class Jagular
       layout_html = render_layout(page)
       final_html = copy_and_replace_images(layout_html, page["slug"]+"/")
       file_path = write_entry_to_file(page, final_html)
-      #write_entry_to_file(page, layout_html)
     
     end
   end
@@ -269,12 +318,13 @@ class Jagular
   # since the #to_html method dumps an entire html doc, need to run this method after layout+page have been generated
     ndoc = Nokogiri::HTML(page_html)
     images = ndoc.search("img")
+    binding.pry
     images.each do |i|
        #check if this image is from our wordpress
        #match against @config["replace_image_urls"]
        #easy with this? Regexp.new @config["json_api"] + "uploads"
        #create_new_image_path(i.get_attribute "src", my_regex, entry_image_dir)
-       
+       i.remove_attribute "srcset" if i.get_attribute "srcset" 
        old_path = i.get_attribute "src"
        new_filename = run_matchers(old_path)
        if new_filename != nil
