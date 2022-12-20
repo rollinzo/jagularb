@@ -6,9 +6,9 @@ build/
 css/
 images/
 templates/
+global_helpers/
 helpers/
 matchers/
 stored_entries/
 public/
 assets/
-

@@ -34,8 +34,12 @@ class Jagular
     end
     fetch_and_load_helpers
     load_matchers
+    @categories = get_categories
     @posts = get_posts
+  #  binding_counter = 0
     @posts.each do |post|
+  #    binding.pry if binding_counter == 0
+#      binding_counter += 1
       post["globals"] = @globals
       post["template"] = @config["templates"]["post_default"]
       post["ruby_datetime"] = DateTime.parse(post["modified_gmt"]).to_time
@@ -43,55 +47,127 @@ class Jagular
     @users = get_users
     @media = get_media
     @tags = get_tags
+    @categories = get_categories
+    load_and_run_global_helpers
+
   end
 
   #PULL JSON FROM WORDPRESS
+  def get_all_of_type_from_api(type_str)
+    per_page = 10 #100 is max
+    keep_pulling = true
+    resp = Faraday.get(@config['json_api'] + "wp-json/wp/v2/#{type_str}?per_page=#{per_page}&page=1")
+    total_pages = resp.body["X-WP-TotalPages"].to_i
+    my_entries = JSON.parse(resp.body)
+    total_pulled = 1
+    while(total_pulled < total_pages)
+      resp = Faraday.get(@config['json_api'] + "wp-json/wp/v2/#{type_str}?per_page=#{per_page}&page=#{total_pulled+1}")
+      my_entries += JSON.parse(resp.body)
+        my_entries += new_entries
+        total_pulled += 1
+    end
+    my_entries
+  end
 
-  def get_pages_json_from_api
-    return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/pages').body
+  def pull_more_from_api(type, per_page, page_number)
+
 
   end
 
-  def get_posts_json_from_api
-    return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/posts').body
-  end
-
-  def get_users_json_from_api
-    return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/users').body
-  end
-
-
-  def get_media_json_from_api
-    return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/media').body
-  end
-
-
-  def get_tags_json_from_api
-    return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/tags').body
+  def get_categories
+    return @categories || get_all_of_type_from_api("categories")
   end
 
   def get_pages
-    return @pages || JSON.parse(get_pages_json_from_api)
+    return @pages || get_all_of_type_from_api("pages")
   end
 
   def get_posts
-    return @posts || JSON.parse(get_posts_json_from_api)
+    return @posts || get_all_of_type_from_api("posts")
   end
 
   def get_users
-     return @users || JSON.parse(get_users_json_from_api)
+     return @users || get_all_of_type_from_api("users")
   end
 
 
   def get_media
-     return @media || JSON.parse(get_media_json_from_api)
+     return @media || get_all_of_type_from_api("media")
   end
 
 
   def get_tags
-     return @tags || JSON.parse(get_tags_json_from_api)
+     return @tags || get_all_of_type_from_api("tags")
   end
+
+  # def get_pages_json_from_api
+  #   binding.pry
+  #   initial_resp = Faraday.get(@config['json_api'] + 'wp-json/wp/v2/pages')
+  #
+  #   return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/pages').body
+  #
+  # end
+  #
+  # def get_posts_json_from_api
+  #   return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/posts').body
+  # end
+  #
+  # def get_users_json_from_api
+  #   return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/users').body
+  # end
+  #
+  #
+  # def get_media_json_from_api
+  #   return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/media').body
+  # end
+  #
+  #
+  # def get_tags_json_from_api
+  #   return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/tags').body
+  # end
+  #
+  # def get_categories_json_from_api
+  #   return Faraday.get(@config['json_api'] + 'wp-json/wp/v2/categories').body
+  # end
+  #
+  # def get_categories
+  #   return @categories || JSON.parse(get_categories_json_from_api)
+  # end
+  #
+  # def get_pages
+  #   return @pages || JSON.parse(get_pages_json_from_api)
+  # end
+  #
+  # def get_posts
+  #   return @posts || JSON.parse(get_posts_json_from_api)
+  # end
+  #
+  # def get_users
+  #    return @users || JSON.parse(get_users_json_from_api)
+  # end
+  #
+  #
+  # def get_media
+  #    return @media || JSON.parse(get_media_json_from_api)
+  # end
+  #
+  #
+  # def get_tags
+  #    return @tags || JSON.parse(get_tags_json_from_api)
+  # end
   #LOAD HELPERS
+
+  def load_and_run_global_helpers
+    @config["global_helpers"].each do |hlpr|
+      require_relative @config["global_helper_path"] + hlpr["file"]
+      if hlpr["runInit"]
+        #assumes Module not Class (unlike the helpers in fetch_and_load_helpers)
+         my_mod = Module.const_get(hlpr["module_name"])
+         my_mod.send(:set_jagular, self)
+         my_mod.run_init_helpers()
+      end
+    end
+  end
 
   def fetch_and_load_helpers
     @pages.each do |page|
