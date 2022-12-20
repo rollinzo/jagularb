@@ -55,17 +55,17 @@ class Jagular
   #PULL JSON FROM WORDPRESS
   def get_all_of_type_from_api(type_str)
     per_page = 10 #100 is max
-    keep_pulling = true
+  #  keep_pulling = true
     resp = Faraday.get(@config['json_api'] + "wp-json/wp/v2/#{type_str}?per_page=#{per_page}&page=1")
-    total_pages = resp.body["X-WP-TotalPages"].to_i
+    total_pages = resp["X-WP-TotalPages"].to_i
     my_entries = JSON.parse(resp.body)
     total_pulled = 1
     while(total_pulled < total_pages)
       resp = Faraday.get(@config['json_api'] + "wp-json/wp/v2/#{type_str}?per_page=#{per_page}&page=#{total_pulled+1}")
       my_entries += JSON.parse(resp.body)
-        my_entries += new_entries
-        total_pulled += 1
+      total_pulled += 1
     end
+    puts "JSONPages pulled: #{type_str}: ___ TOTAL(pulled) #{total_pages} (#{total_pulled})"
     my_entries
   end
 
